@@ -1,5 +1,6 @@
-streamlit
-pandas
-scikit-learn
-numpy
-Pillow
+streamlit 
+pandas 
+scikit-learn 
+torch 
+torchvision 
+pillow
