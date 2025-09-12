@@ -1,199 +1,107 @@
-import streamlit as st
-import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
+import streamlit as st, pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC
-import numpy as np
-import random
+import torch
 from PIL import Image
+from torchvision import transforms, models
 
-# --- Streamlit App Layout ---
-st.set_page_config(
-    page_title="Flavor Finder: A Recipe Recommendation App",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-st.title("Flavor Finder")
-st.markdown("## Find Your Next Favorite Recipe")
+st.set_page_config(page_title="FlavorLens: Recipes at Your Fingertips", layout="wide")
+st.title("👁️‍🗨️ FlavorLens: Recipes at Your Fingertips")
+st.caption("Find, create, and explore recipes by text... or snap a food photo for suggestions!")
 
-# --- Sidebar Controls ---
-st.sidebar.header("Data & Mode Selection")
-uploaded_file = st.sidebar.file_uploader(
-    "Upload your cleaned CSV file (with 'title', 'ingredients', and 'cuisine_type' columns)",
-    type="csv"
-)
+@st.cache_data
+def load_data():
+    df = pd.read_csv("recipes_dataset.csv")
+    df = df[df['Ingredients_CleanedAuto_CleanedAuto'].notna() & df['RecipeName_CleanedAuto_CleanedAuto'].notna()]
+    rec = df[['RecipeName_CleanedAuto_CleanedAuto','Ingredients_CleanedAuto_CleanedAuto','Cuisine_CleanedAuto_CleanedAuto','Course_CleanedAuto_CleanedAuto']].fillna("")
+    rec.columns=['title','ingredients','cuisine','course']
+    return rec
 
-mode = st.sidebar.radio(
-    "Select a mode:",
-    ("Text-based Recommendation (NLP)", "Image-based Recommendation (CV)")
-)
-
-# Initialize dataframes and models
-recipes_df = None
-tfidf = None
-tfidf_matrix = None
-
-if uploaded_file is not None:
+def get_recommendations(user_query, tfidf_matrix, tfidf, rec_df):
     try:
-        recipes_df = pd.read_csv(uploaded_file)
-        if not all(col in recipes_df.columns for col in ['title', 'ingredients', 'cuisine_type']):
-            st.error("The uploaded CSV must contain 'title', 'ingredients', and 'cuisine_type' columns.")
-            recipes_df = None
-        else:
-            st.sidebar.success("File uploaded successfully!")
-            # Vectorize the ingredient data after upload
-            tfidf = TfidfVectorizer(stop_words='english')
-            tfidf_matrix = tfidf.fit_transform(recipes_df['ingredients'])
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
-        recipes_df = None
-
-# --- Recommendation Section (shared function) ---
-def get_recommendations(user_query, tfidf_matrix, df, tfidf_vectorizer):
-    """Generates recipe recommendations based on a user's query."""
-    if not user_query or df is None:
+        vec = tfidf.transform([user_query])
+        sims = cosine_similarity(vec, tfidf_matrix).flatten()
+        top = sims.argsort()[-5:][::-1]
+        res = rec_df.iloc[top].copy()
+        res['similarity_score'] = sims[top]
+        return res
+    except:
         return pd.DataFrame()
 
-    try:
-        # Vectorize user input
-        user_tfidf = tfidf_vectorizer.transform([user_query])
-    except ValueError as e:
-        st.warning(f"Could not vectorize your input. Please try a different combination of words. Error: {e}")
-        return pd.DataFrame()
+rec_df = load_data()
+stopwords = set(ENGLISH_STOP_WORDS)
+tfidf = TfidfVectorizer(stop_words=stopwords)
+tfidf_matrix = tfidf.fit_transform(rec_df['ingredients'])
 
-    # Compute similarity scores
-    cosine_similarities = cosine_similarity(user_tfidf, tfidf_matrix).flatten()
-
-    # Get the top 5 most similar recipes
-    top_indices = cosine_similarities.argsort()[:-6:-1]
-    recommendations = df.iloc[top_indices].copy()
-    recommendations['similarity_score'] = [cosine_similarities[i] for i in top_indices]
-
-    return recommendations
-
-# --- Mode-specific UI and Logic ---
-if mode == "Text-based Recommendation (NLP)":
-    st.header("Text-based Recommendation Engine")
-    st.markdown("Enter ingredients, and the app will find recipes with a similar flavor profile.")
-    
-    user_input = st.text_area(
-        "Enter a few ingredients, flavors, or a dish you like:",
-        "chicken, garlic, and fresh herbs"
-    )
-
+col1, col2 = st.columns([2,1])
+with col1:
+    user_input = st.text_area("🔍 Ingredients, flavors, or dish:", "chicken, garlic, herb")
     if st.button("Find Recipes"):
-        if recipes_df is not None:
-            recommendations = get_recommendations(user_input, tfidf_matrix, recipes_df, tfidf)
-            if not recommendations.empty:
-                st.subheader("Top Recipe Recommendations:")
-                st.dataframe(recommendations[['title', 'ingredients', 'similarity_score']])
-            else:
-                st.warning("No recommendations found. Please try different keywords or check your data.")
-        else:
-            st.warning("Please upload a CSV file first.")
+        if user_input.strip():
+            r = get_recommendations(user_input, tfidf_matrix, tfidf, rec_df)
+            if not r.empty:
+                st.dataframe(r[["title","ingredients","cuisine","similarity_score"]],use_container_width=True,hide_index=True)
+            else: st.warning("No good matches found. Try more or different words.")
+        else: st.warning("Type some ingredients or a recipe idea.")
+with col2:
+    st.image("https://placehold.co/400x320/e0f2fe/1f2937?text=Snap+or+Type+for+Recipes",use_column_width=True)
 
-    st.markdown("---")
-    
-    # --- Hyperparameter Tuning Section ---
-    st.header("Hyperparameter Tuning Demonstration with Cross-Validation")
-    st.markdown(
-        "This section demonstrates how to find the best hyperparameters for a model "
-        "using `GridSearchCV` and a `Pipeline` with 5-fold cross-validation. "
-        "We will tune a Support Vector Classifier (SVC) to classify recipes as 'Sweet' or 'Savory'."
-    )
-    
+st.markdown("---")
+st.subheader("📷 Snap2Recipe: AI-powered food photo ingredient detector")
+with st.expander("Upload a food photo to suggest ingredients & recipes!"):
+    f = st.file_uploader("Choose a food photo...",type=["jpg","jpeg","png"])
+    if f:
+        img = Image.open(f).convert("RGB")
+        st.image(img,caption="Your uploaded image",use_column_width=True)
+        model = models.resnet18(weights="IMAGENET1K_V1"); model.eval()
+        trf = transforms.Compose([transforms.Resize(256),transforms.CenterCrop(224),transforms.ToTensor(),transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])])
+        timg = trf(img).unsqueeze(0)
+        with torch.no_grad(): out = model(timg)
+        _, idx = torch.topk(out,5)
+        @st.cache_data
+        def get_labels():
+            url = "https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt"
+            return pd.read_csv(url,header=None)[0].tolist()
+        labels = get_labels(); preds = [labels[i] for i in idx[0]]
+        foodwords=['dish','pizza','salad','meat','sandwich','rice','noodle','bread','vegetable','cake','chocolate','soup','egg','burger']
+        fp = [p for p in preds if any(x in p for x in foodwords)]
+        uq = ', '.join(fp) if fp else ', '.join(preds[:3])
+        st.markdown("#### Detected: "+", ".join(fp if fp else preds[:3]))
+        if st.button("🔍 Find Recipes from Image Ingredients"):
+            r = get_recommendations(uq,tfidf_matrix,tfidf,rec_df)
+            if not r.empty: st.dataframe(r[["title","ingredients","cuisine","similarity_score"]],use_container_width=True,hide_index=True)
+            else: st.warning("No matching recipes found.")
+
+st.markdown("---")
+st.subheader("🏢 Simple Automated Recipe Generator")
+with st.expander("Give ingredients, get a creative AI recipe!"):
+    ci = st.text_area("Ingredients for new recipe:", "tofu, spinach, chili flakes")
+    if st.button("Generate New Recipe"):
+        ing = [x.strip().capitalize() for x in ci.split(',') if x.strip()]
+        if ing:
+            title="Fusion "+" and ".join(ing)+" Surprise"
+            st.success("Your AI-generated recipe:")
+            st.subheader(title)
+            st.markdown(f"**Ingredients:** {', '.join(ing)}")
+            st.text("1. Combine all ingredients.\n2. Cook and season to taste.\n3. Serve and enjoy!")
+        else: st.warning("Please add some ingredients.")
+
+st.markdown("---")
+st.subheader("🔧 Model Hyperparameter Tuning Demo")
+with st.expander("See ML tuning using real recipe data:"):
     if st.button("Start Hyperparameter Tuning"):
-        if recipes_df is not None:
-            with st.spinner('Tuning in progress... This may take a moment.'):
-                # Prepare data for the tuning example
-                X = recipes_df['ingredients']
-                y = recipes_df['cuisine_type']
-    
-                # Create a pipeline
-                pipeline = Pipeline([
-                    ('tfidf', TfidfVectorizer()),
-                    ('clf', SVC())
-                ])
-    
-                # Define the parameter grid to search
-                param_grid = {
-                    'tfidf__ngram_range': [(1, 1), (1, 2)],
-                    'clf__C': [0.1, 1, 10, 100],
-                    'clf__kernel': ['linear', 'rbf']
-                }
-    
-                # Setup GridSearchCV with 5-fold cross-validation
-                grid_search = GridSearchCV(
-                    pipeline,
-                    param_grid,
-                    cv=5,
-                    verbose=1,
-                    n_jobs=-1  # Use all available cores
-                )
-    
-                # Split data and fit the grid search model
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X, y, test_size=0.3, random_state=42, stratify=y
-                )
-                grid_search.fit(X_train, y_train)
-    
-                # Display results
-                st.success("Tuning complete!")
-                st.markdown(f"**Best Cross-Validation Score:** `{grid_search.best_score_:.4f}`")
-                st.markdown(f"**Best Hyperparameters:** `{grid_search.best_params_}`")
-                
-                # Optionally, show some predictions from the best model
-                st.subheader("Example Predictions from the Best Model")
-                best_model = grid_search.best_estimator_
-                example_data = X_test.sample(n=min(5, len(X_test)), random_state=42)
-                predictions = best_model.predict(example_data)
-                
-                results_df = pd.DataFrame({
-                    'Recipe Ingredients': example_data,
-                    'Predicted Type': predictions
-                })
-                st.dataframe(results_df)
-    
-        else:
-            st.warning("Please upload a CSV file first.")
-
-elif mode == "Image-based Recommendation (CV)":
-    st.header("Image-based Recommendation Engine")
-    st.markdown("Upload an image of a food item, and the app will try to identify key ingredients to find recipes.")
-    
-    uploaded_image = st.file_uploader(
-        "Upload an image of a food item",
-        type=["jpg", "jpeg", "png"]
-    )
-    
-    if uploaded_image is not None:
-        try:
-            # Display the uploaded image
-            image = Image.open(uploaded_image)
-            st.image(image, caption='Uploaded Image', use_column_width=True)
-            
-            # --- Simulated Computer Vision Model ---
-            # In a real app, you would use a pre-trained model to get
-            # a list of predicted ingredients. Here, we'll use a placeholder.
-            st.markdown("Simulating computer vision analysis...")
-            
-            # Simple simulation: assume certain images contain certain ingredients
-            simulated_ingredients = "chicken, onions, tomatoes, peppers"
-            
-            st.markdown(f"**Simulated CV Result:** The model identified the following ingredients: `{simulated_ingredients}`")
-
-            # Use the simulated ingredients to get recommendations
-            if st.button("Find Recipes Based on Image"):
-                if recipes_df is not None:
-                    recommendations = get_recommendations(simulated_ingredients, tfidf_matrix, recipes_df, tfidf)
-                    if not recommendations.empty:
-                        st.subheader("Top Recipe Recommendations:")
-                        st.dataframe(recommendations[['title', 'ingredients', 'similarity_score']])
-                    else:
-                        st.warning("No recommendations found based on the image's ingredients. Please try another image or check your data.")
-                else:
-                    st.warning("Please upload a CSV file first.")
-        except Exception as e:
-            st.error(f"Error processing image: {e}")
+        with st.spinner('Tuning ML model...'):
+            s=rec_df.sample(n=100,random_state=42) if len(rec_df)>100 else rec_df
+            X,y=s['ingredients'],s['cuisine']
+            pipeline=Pipeline([('tfidf',TfidfVectorizer(stop_words=stopwords)),('clf',SVC())])
+            grid=GridSearchCV(pipeline,{'tfidf__ngram_range':[(1,1),(1,2)],'clf__C':[0.1,1,10,100],'clf__kernel':['linear','rbf']},cv=2,verbose=1,n_jobs=-1)
+            X_tr,X_te,y_tr,y_te=train_test_split(X,y,stratify=y,test_size=0.3,random_state=42)
+            grid.fit(X_tr,y_tr)
+            st.success("Tuning complete!");st.write(f"**Best CV Score:** `{grid.best_score_:.4f}`");st.write(f"**Best Hyperparameters:** `{grid.best_params_}`")
+            e=X_te.sample(n=min(3,len(X_te)),random_state=42)
+            preds=grid.best_estimator_.predict(e)
+            df=pd.DataFrame({'Ingredients':e.values,'Predicted Cuisine':preds})
+            st.dataframe(df,use_container_width=True,hide_index=True)
