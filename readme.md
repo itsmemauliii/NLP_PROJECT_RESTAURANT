@@ -1,6 +1,6 @@
 # FlavorLens: Recipes at Your Fingertips
 
-### AI-Powered Recipe Discovery, Ingredient Detection & ML Tuning Demo
+### AI-Powered Recipe Discovery, Ingredient Detection & ML Tuning 
 
 **Author:** Mauli Patel
 **Course:** MSc Big Data Analytics (Semester 3 NLP Project)
@@ -108,7 +108,7 @@ FlavorLens/
 
 ## Acknowledgements
 
-Developed by **Mauli Patel** as part of an academic research project under the MSc Big Data Analytics program.
+Developed by **Mauli Patel** as part of an academic project under the MSc Big Data Analytics program.
 Inspired by the intersection of AI, creativity, and everyday cooking experiences.
 
 ---
